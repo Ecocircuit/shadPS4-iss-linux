@@ -76,7 +76,11 @@ int main(int argc, char* argv[]) {
     bool showFps = false;
     bool configClean = false;
     bool configGlobal = false;
+#ifdef __linux__
+    bool bigPicture = argc == 1;
+#else
     bool bigPicture = false;
+#endif
     bool sameProcess = false;
 
     std::optional<std::filesystem::path> addGameFolder;
@@ -119,15 +123,15 @@ int main(int argc, char* argv[]) {
     });
 
     // ---- No-args behavior ----
-    // Release mode: the saved game folder, or a folder picker on the first launch.
+    // Linux opens the launcher. Other release builds retain their game picker.
     std::optional<std::filesystem::path> releaseGame;
-    if (argc == 1 && Common::ReleaseMode::Active()) {
+    if (argc == 1 && !bigPicture && Common::ReleaseMode::Active()) {
         releaseGame = Common::ReleaseMode::GamePath();
         if (!releaseGame) {
             return 0; // picker cancelled
         }
         gamePath = Common::FS::PathToUTF8String(*releaseGame);
-    } else if (argc == 1) {
+    } else if (argc == 1 && !bigPicture) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "shadPS4",
                                  "This is a CLI application. Please use the QTLauncher for a GUI:\n"
                                  "https://github.com/shadps4-emu/shadps4-qtlauncher/releases",
@@ -141,9 +145,6 @@ int main(int argc, char* argv[]) {
     } catch (const CLI::ParseError& e) {
         return app.exit(e);
     }
-
-    if (waitPid)
-        Core::Debugger::WaitForPid(*waitPid);
 
     // Initialize main log with default config
     Common::Log::Setup("shadps4.log");
@@ -177,9 +178,55 @@ int main(int argc, char* argv[]) {
     Common::Log::g_should_append |= EmulatorSettings.IsLogAppend();
 
     if (bigPicture) {
-        BigPictureMode::Launch(executable_name, sameProcess);
-        return 0;
+        Launcher::Options initial;
+        initial.game = gamePath.value_or("");
+        initial.patch = patchFile.value_or("");
+        initial.override_root = overrideRoot ? overrideRoot->string() : "";
+        initial.ignore_game_patch = ignoreGamePatch;
+        initial.show_fps = showFps;
+        initial.log_append = Common::Log::g_should_append;
+        initial.wait_for_debugger = waitForDebugger;
+        initial.wait_for_process = waitPid.has_value();
+        initial.wait_pid = waitPid.value_or(0);
+        initial.same_process = sameProcess;
+        initial.config_mode = configGlobal ? 2 : configClean ? 1 : 0;
+        if (fullscreenStr) {
+            if (*fullscreenStr != "true" && *fullscreenStr != "false") {
+                LOG_ERROR(Debug, "Invalid argument for --fullscreen (use true|false)");
+                return 1;
+            }
+            initial.fullscreen = *fullscreenStr == "true" ? 1 : 2;
+        }
+        auto launch = BigPictureMode::Launch(initial, app.help());
+        if (!launch)
+            return 0;
+        if (!launch->same_process) {
+            auto* emulator = Common::Singleton<Core::Emulator>::Instance();
+            emulator->executableName = executable_name;
+            emulator->Relaunch(launch->Arguments());
+        }
+        // Same-process launches use the same flag application and path resolution
+        // below as normal CLI launches, rather than bypassing them in the GUI.
+        gamePath = launch->game;
+        patchFile = launch->patch.empty() ? std::nullopt : std::optional{launch->patch};
+        overrideRoot = launch->override_root.empty()
+                           ? std::nullopt
+                           : std::optional{std::filesystem::path{launch->override_root}};
+        ignoreGamePatch = launch->ignore_game_patch;
+        showFps = launch->show_fps;
+        waitForDebugger = launch->wait_for_debugger;
+        waitPid = launch->wait_for_process ? std::optional{launch->wait_pid} : std::nullopt;
+        fullscreenStr =
+            launch->fullscreen == 0
+                ? std::nullopt
+                : std::optional<std::string>{launch->fullscreen == 1 ? "true" : "false"};
+        configClean = launch->config_mode == 1;
+        configGlobal = launch->config_mode == 2;
+        Common::Log::g_should_append = launch->log_append || EmulatorSettings.IsLogAppend();
     }
+
+    if (waitPid)
+        Core::Debugger::WaitForPid(*waitPid);
 
     // ---- Utility commands ----
     if (addGameFolder) {

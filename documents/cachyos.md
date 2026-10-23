@@ -42,12 +42,27 @@ a version suffix. Initial development used Clang 19 and libc++ 19.
 ./build/linux/app/shadps4 --big-picture
 ```
 
-With no arguments, the application reuses its remembered game or opens the host
-folder picker. Pick the complete game directory with `eboot.bin` and
-`sce_sys/param.sfo`. Cancel closes the application. If no portal is available,
-use `--game`; an interactive terminal also offers a path prompt on picker failure.
-Big Picture's **Add Folder** uses the native picker on Linux, falls back to the
-existing ImGui picker on failure, and also offers an absolute **Add Path** field.
+With no arguments, the application opens its SDL3/Dear ImGui launcher, using the
+existing Big Picture interface. Enter a game folder, executable, or game ID,
+or use **Choose Game Folder** for the native desktop picker, then press **Play**.
+A complete game folder contains `eboot.bin` and `sce_sys/param.sfo`. If the portal
+is unavailable, enter an absolute path in the game field.
+
+**Launch Settings** saves patch selection, automatic-patch handling, fullscreen
+mode, FPS display, clean/global configuration, log appending, override root,
+debugger/process waits and same-process launching. **Emulator Settings** retains
+the existing graphics, audio, input and other settings. Library and add-on folder
+actions are also available under Launch Settings and take effect immediately.
+The command-line help is available inside the settings panel.
+
+Play normally closes the launcher and starts a fresh emulator process with these
+arguments. Advanced settings can select the existing same-process behavior.
+`--big-picture` explicitly opens the launcher; `--help` displays CLI help and exits.
+Direct `--game` launches continue to work without opening the GUI. Paths are passed
+as individual arguments, so spaces and shell punctuation remain literal.
+
+Launch options are saved in `launcher.json` in the emulator user directory.
+The old remembered game is imported when no new game selection has been saved.
 
 The remembered selection lives under `$XDG_DATA_HOME/shadPS4/`, or
 `~/.local/share/shadPS4/`. Existing portable `user/` directories take precedence.
@@ -86,6 +101,12 @@ outside this launch/Vulkan change. Controller input and the existing SDL input
 paths are retained.
 Hardware rendering, KDE dialogs and actual gameplay must be validated on the
 host: a cloud build without a Radeon or graphical session cannot establish them.
+
+For a Clang build using your installed GCC standard library instead of libc++, use:
+
+```sh
+SHADPS4_BUILD_ROOT="$PWD/build/linux-libstdcxx" CXXFLAGS="-stdlib=libstdc++" bash scripts/build-linux.sh
+```
 
 An existing test, `WindowsGuestRedZoneProtectionProfileTest.GlobalConfigCannotEnableProtection`,
 fails because the settings loader accepts this Windows setting from global JSON.

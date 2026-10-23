@@ -796,6 +796,8 @@ set(COMMON src/common/logging/classes.h
            src/common/path_util.cpp
            src/common/path_util.h
            src/common/release_mode.cpp
+           src/common/launch_options.cpp
+           src/common/launch_options.h
            src/common/release_mode_linux.cpp
            src/common/native_folder_dialog.cpp
            src/common/native_folder_dialog.h

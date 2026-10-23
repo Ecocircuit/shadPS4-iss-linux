@@ -23,9 +23,9 @@ CMake 3.31.6 and Ninja 1.12.1. This is not a CachyOS hardware certification.
 
 ## Existing suite outcomes
 
-The CI test selection (`ctest ... -E GcnTest`) runs 379 tests:
+The CI test selection (`ctest ... -E GcnTest`) runs 387 tests:
 
-- 377 passed, including all five Linux startup tests.
+- 385 passed, including five Linux startup tests and eight launch-options tests.
 - 1 failed: `WindowsGuestRedZoneProtectionProfileTest.GlobalConfigCannotEnableProtection`.
   The current settings loader accepts the Windows protection setting from global JSON, contrary
   to the existing test's expectation. Its implementation and assertions were not changed.
@@ -37,13 +37,31 @@ was run separately. No real game files were available for a gameplay check.
 ## Host checks still needed
 
 1. On CachyOS, `vulkaninfo --summary` should identify the RX 9060 XT and the RADV driver.
-2. Launch with no arguments and confirm KDE's native picker opens. Choose a complete game folder,
-   then confirm the selection is remembered on the next run. Cancel should close cleanly.
-3. Try `--game /home/tony/games/game-folder`, including a path containing spaces if applicable.
-4. In `--big-picture`, use **Add Folder** and **Add Path**. Select either a complete game or a
-   directory containing game folders; confirm the game appears and launches.
+2. Launch with no arguments and confirm the launcher opens. Use **Choose Game Folder**
+   to check KDE's native picker, or enter an absolute path. Press Play to launch.
+3. Change Launch Settings, restart the launcher and check persistence and gameplay behavior.
+   Direct `--game /home/tony/games/game-folder` remains supported.
+4. Add a library using Launch Settings or Emulator Settings and check game cards.
 5. Check real gameplay, Vulkan rendering, controller/input behavior and settings on your GPU.
    The existing direct mouse-camera hook and DLSS integrations remain Windows-only.
 
 FSR 4.1/Redstone was investigated but not integrated: AMD's pinned SDK documentation referenced
 in [the CachyOS guide](cachyos.md) states that Vulkan is unsupported. Existing FSR 1 is retained.
+
+## Launcher GUI validation
+
+- Rebuilt the native Release application with the updated SDL3/Dear ImGui launcher.
+- Exercised the actual window under Xvfb with SDL software rendering: main screen,
+  empty-game validation, launch settings, advanced options and the fixed Save footer.
+- Typed game IDs and patch paths, toggled FPS, saved and reopened the launcher;
+  both the selected game and settings were restored.
+- Pressed Play and verified the child process received separate game, patch (including
+  spaces), FPS and parent-wait arguments. A deliberately unavailable game ID exited
+  through normal CLI resolution without reopening the GUI.
+- Exercised same-process Play through the same normal game resolution path.
+- Fixed the existing WASD-to-arrow key mapping that interfered with typing paths.
+- Eight model tests cover flag generation, literal arguments, validation, CLI overrides,
+  persistence and malformed settings. These and the five startup tests pass.
+
+No game files are available here; successful gameplay and KDE's native portal still
+require host testing. Xvfb verifies the launcher UI, not hardware rendering.

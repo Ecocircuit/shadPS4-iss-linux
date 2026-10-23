@@ -12,10 +12,12 @@ FetchContent_MakeAvailable(googletest)
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(shadps4_linux_startup_test
         test_linux_startup.cpp
+        test_launch_options.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/launch_options.cpp
         ${CMAKE_SOURCE_DIR}/src/common/release_mode_linux.cpp
         ${CMAKE_SOURCE_DIR}/src/common/native_folder_dialog.cpp)
     target_include_directories(shadps4_linux_startup_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_link_libraries(shadps4_linux_startup_test PRIVATE GTest::gtest_main SDL3::SDL3)
+    target_link_libraries(shadps4_linux_startup_test PRIVATE GTest::gtest_main SDL3::SDL3 nlohmann_json::nlohmann_json)
     include(GoogleTest)
     gtest_discover_tests(shadps4_linux_startup_test)
 endif()

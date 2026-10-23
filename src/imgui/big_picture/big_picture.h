@@ -4,11 +4,13 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <vector>
 #include <SDL3/SDL.h>
 #include <imgui.h>
 
 #include "common/types.h"
+#include "common/launch_options.h"
 
 namespace BigPictureMode {
 
@@ -20,7 +22,8 @@ struct IconInfo {
     bool focusState;
 };
 
-void Launch(char* executableName, bool sameProcess);
+std::optional<Launcher::Options> Launch(const Launcher::Options& commandLine,
+                                      const std::string& commandLineHelp);
 void GetGameIconInfo(std::vector<IconInfo>& icons);
 SDL_Texture* LoadSdlTextureData(std::vector<u8> data);
 SDL_Texture* LoadSdlTextureDataFromFile(std::filesystem::path filePath);

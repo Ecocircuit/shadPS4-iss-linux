@@ -1,11 +1,15 @@
 //  SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 //  SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <array>
+#include <cstdio>
 #include <fstream>
 #include <stb_image.h>
 
-#include "common/logging/log.h"
 #include "common/game_folder.h"
+#include "common/logging/log.h"
+#include "common/native_folder_dialog.h"
+#include "core/debugger.h"
 #include "core/devtools/layer.h"
 #include "core/emulator_settings.h"
 #include "core/file_format/psf.h"
@@ -23,16 +27,130 @@ namespace BigPictureMode {
 
 constexpr float gameImageSize = 200.f;
 
-bool done = false;
-bool showSettings = false;
-
-std::filesystem::path runEbootPath = "";
 std::vector<IconInfo> gameIcons = {};
 
 float uiScale = 1.0f;
 SDL_Renderer* renderer;
 
 namespace {
+
+bool InputString(const char* label, std::string& value) {
+    std::array<char, 4096> text{};
+    std::snprintf(text.data(), text.size(), "%s", value.c_str());
+    if (!ImGui::InputText(label, text.data(), text.size()))
+        return false;
+    value = text.data();
+    return true;
+}
+
+void BrowseFolder(std::string& value, std::string& error, SDL_Window* parent) {
+    auto choice = Common::PickNativeFolder(parent);
+    if (choice.path) {
+        value = choice.path->string();
+        error.clear();
+    }
+    if (!choice.error.empty())
+        error = choice.error + " Enter an absolute path instead.";
+}
+
+void DrawLaunchSettings(Launcher::Options& options, const std::string& help, bool& open,
+                        std::string& error, bool& refresh, SDL_Window* parent,
+                        const std::filesystem::path& settings_file) {
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 6));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 8));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16, 16));
+    const auto* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(std::min(900.0f, viewport->WorkSize.x - 40),
+                                    std::min(680.0f, viewport->WorkSize.y - 40)),
+                             ImGuiCond_Appearing);
+    bool was_open = open;
+    if (ImGui::Begin("Launch Settings", &open)) {
+        ImGui::SetWindowFontScale(0.8f);
+        ImGui::BeginChild("Launch options", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()));
+        ImGui::TextWrapped(
+            "These options are applied when you press Play. Game and graphics settings "
+            "are also available under Emulator Settings.");
+        ImGui::Separator();
+        ImGui::TextUnformatted("Patch file (--patch)");
+        ImGui::SetNextItemWidth(-1);
+        InputString("##patch", options.patch);
+        ImGui::Checkbox("Ignore automatic game patches", &options.ignore_game_patch);
+        ImGui::Combo("Display mode", &options.fullscreen,
+                     "Configured default\0Fullscreen\0Windowed\0");
+        ImGui::Checkbox("Show FPS", &options.show_fps);
+        ImGui::Combo("Configuration mode", &options.config_mode,
+                     "Configured default\0Clean configuration\0Global configuration\0");
+        ImGui::Checkbox("Append game log", &options.log_append);
+        ImGui::TextUnformatted("Override root");
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 120);
+        InputString("##root", options.override_root);
+        ImGui::SameLine();
+        if (ImGui::Button("Browse##root"))
+            BrowseFolder(options.override_root, error, parent);
+        if (ImGui::CollapsingHeader("Advanced launch options")) {
+            ImGui::Checkbox("Run game in this process (--same-process)", &options.same_process);
+            ImGui::Checkbox("Wait for a debugger before running the game",
+                            &options.wait_for_debugger);
+            ImGui::Checkbox("Wait for another process to exit", &options.wait_for_process);
+            ImGui::BeginDisabled(!options.wait_for_process);
+            ImGui::InputInt("Process ID", &options.wait_pid);
+            ImGui::EndDisabled();
+        }
+        if (ImGui::CollapsingHeader("Game libraries and add-on folder")) {
+            static std::string library, addon;
+            ImGui::TextWrapped("These actions update the emulator's folder settings immediately.");
+            ImGui::TextUnformatted("Library folder");
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 120);
+            InputString("##library", library);
+            ImGui::SameLine();
+            if (ImGui::Button("Browse##library"))
+                BrowseFolder(library, error, parent);
+            if (ImGui::Button("Add Game Library (--add-game-folder)")) {
+                std::error_code ec;
+                if (std::filesystem::is_directory(library, ec)) {
+                    EmulatorSettings.AddGameInstallDir(std::filesystem::path{library});
+                    EmulatorSettings.Save();
+                    refresh = true;
+                    error.clear();
+                } else
+                    error = "Choose an existing game library directory.";
+            }
+            ImGui::TextUnformatted("Add-on folder");
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 120);
+            InputString("##addon", addon);
+            ImGui::SameLine();
+            if (ImGui::Button("Browse##addon"))
+                BrowseFolder(addon, error, parent);
+            if (ImGui::Button("Set Add-on Folder (--set-addon-folder)")) {
+                std::error_code ec;
+                if (std::filesystem::is_directory(addon, ec)) {
+                    EmulatorSettings.SetAddonInstallDir(std::filesystem::path{addon});
+                    EmulatorSettings.Save();
+                    error.clear();
+                } else
+                    error = "Choose an existing add-on directory.";
+            }
+        }
+        if (ImGui::CollapsingHeader("Command-line help")) {
+            ImGui::TextUnformatted(help.c_str());
+            ImGui::TextWrapped(
+                "Big Picture is this launcher. Play starts the selected game directly, "
+                "without forwarding --big-picture or --help.");
+        }
+        if (!error.empty())
+            ImGui::TextWrapped("%s", error.c_str());
+        ImGui::EndChild();
+        if (ImGui::Button("Save and Close")) {
+            if (options.Save(settings_file, error))
+                open = false;
+        }
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(3);
+    if (was_open && !open)
+        options.Save(settings_file, error);
+}
 
 std::filesystem::path UpdateChecker(const std::string sceItem, std::filesystem::path game_folder) {
     std::filesystem::path outputPath;
@@ -50,7 +168,7 @@ std::filesystem::path UpdateChecker(const std::string sceItem, std::filesystem::
     return outputPath;
 }
 
-void SetGameIcons(std::vector<IconInfo>& gameIcons) {
+void SetGameIcons(std::vector<IconInfo>& gameIcons, std::string& selectedGame) {
     ImGuiStyle& style = ImGui::GetStyle();
     const float maxAvailableWidth = ImGui::GetContentRegionAvail().x;
     const float itemSpacing = style.ItemSpacing.x; // already scaled
@@ -72,9 +190,10 @@ void SetGameIcons(std::vector<IconInfo>& gameIcons) {
         if (id != nullptr) {
             if (ImGui::ImageButton(ButtonNameChar, id,
                                    ImVec2(gameImageSize * uiScale, gameImageSize * uiScale))) {
-                done = true;
-                runEbootPath = gameIcons[i].ebootPath;
+                selectedGame = gameIcons[i].ebootPath.string();
             }
+        } else if (ImGui::Button(ButtonNameChar, ImVec2(gameImageSize * uiScale, gameImageSize * uiScale))) {
+            selectedGame = gameIcons[i].ebootPath.string();
         }
 
         if (buttonFocused) {
@@ -116,12 +235,15 @@ SDL_Texture* LoadSdlTextureData(std::vector<u8> data) {
         (const unsigned char*)data.data(), (int)data.size(), &image_width, &image_height, NULL, 4);
     if (image_data == nullptr) {
         LOG_ERROR(ImGui, "Failed to load image: {}", stbi_failure_reason());
+        return nullptr;
     }
 
     SDL_Surface* surface = SDL_CreateSurfaceFrom(image_width, image_height, SDL_PIXELFORMAT_RGBA32,
                                                  (void*)image_data, channels * image_width);
     if (surface == nullptr) {
         LOG_ERROR(ImGui, "Unable to create SDL surface: {}", SDL_GetError());
+        stbi_image_free(image_data);
+        return nullptr;
     }
 
     SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
@@ -143,6 +265,7 @@ SDL_Texture* LoadSdlTextureDataFromFile(std::filesystem::path filePath) {
 }
 
 void GetGameIconInfo(std::vector<IconInfo>& icons) {
+    for (const auto& icon : icons) SDL_DestroyTexture(reinterpret_cast<SDL_Texture*>(icon.textureId));
     icons.clear();
 
     for (const auto& installLoc : EmulatorSettings.GetAllGameInstallDirs()) {
@@ -183,11 +306,24 @@ void GetGameIconInfo(std::vector<IconInfo>& icons) {
     });
 }
 
-void Launch(char* executableName, bool sameProcess) {
+std::optional<Launcher::Options> Launch(const Launcher::Options& commandLine,
+                                      const std::string& commandLineHelp) {
+    bool done = false, play = false, showSettings = false, showLaunchSettings = false;
+    std::string launch_error;
+    const auto user_dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir);
+    const auto settings_file = user_dir / "launcher.json";
+    auto options = Launcher::Options::Load(settings_file, launch_error);
+    const bool settings_load_failed = !launch_error.empty();
+    if (options.game.empty()) {
+        std::ifstream old_selection{user_dir / "shadps4-game.txt"};
+        std::getline(old_selection, options.game);
+        if (!options.game.empty() && options.game.back() == '\r') options.game.pop_back();
+    }
+    options.ApplyOverrides(commandLine);
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         LOG_ERROR(ImGui, "SDL_INIT_VIDEO Error: {}", SDL_GetError());
         SDL_Quit();
-        return;
+        return {};
     }
 
     if (!SDL_Init(SDL_INIT_GAMEPAD)) {
@@ -195,21 +331,26 @@ void Launch(char* executableName, bool sameProcess) {
     }
 
     SDL_Window* window =
-        SDL_CreateWindow("shadPS4 Big Picture Mode", 1280, 720,
-                         EmulatorSettings.IsFullScreen() ? SDL_WINDOW_FULLSCREEN : 0);
+        SDL_CreateWindow("shadPS4 Launcher", 1280, 720, SDL_WINDOW_RESIZABLE);
     if (window == nullptr) {
         LOG_ERROR(ImGui, "SDL Window Creation Error: {}", SDL_GetError());
         SDL_Quit();
-        return;
+        return {};
     }
 
     Frontend::SetDefaultWindowIcon(window);
     renderer = SDL_CreateRenderer(window, nullptr);
+    if (!renderer) {
+        LOG_ERROR(ImGui, "Launcher renderer creation failed: {}", SDL_GetError());
+        SDL_DestroyWindow(window); SDL_Quit(); return {};
+    }
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
     ImGuiIO& io = ImGui::GetIO();
+    const auto layout_file = (user_dir / "launcher-layout.ini").string();
+    io.IniFilename = layout_file.c_str();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigNavCursorVisibleAlways = true;
@@ -233,8 +374,6 @@ void Launch(char* executableName, bool sameProcess) {
         uiScale = EmulatorSettings.GetBigPictureScale() / 1000.f;
         sliderScale = uiScale;
         GetGameIconInfo(gameIcons);
-        SDL_SetWindowFullscreen(window,
-                                EmulatorSettings.IsFullScreen() ? SDL_WINDOW_FULLSCREEN : 0);
     };
     applySettings();
 
@@ -275,9 +414,32 @@ void Launch(char* executableName, bool sameProcess) {
         ImGuiWindowFlags window_flags =
             ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollWithMouse;
 
-        ImGui::Begin("Game Window", &done, window_flags);
+        ImGui::Begin("Game Window", nullptr, window_flags);
         ImGui::DrawPrettyBackground();
         ImGui::SetWindowFontScale(uiScale);
+
+        ImGui::TextUnformatted("shadPS4 Launcher");
+        const float browseWidth = ImGui::CalcTextSize("Choose Game Folder").x +
+                                  2 * ImGui::GetStyle().FramePadding.x;
+        ImGui::SetNextItemWidth(std::max(80.0f, ImGui::GetContentRegionAvail().x - browseWidth -
+                                                  ImGui::GetStyle().ItemSpacing.x));
+        InputString("##selected-game", options.game);
+        ImGui::SameLine();
+        if (ImGui::Button("Choose Game Folder")) BrowseFolder(options.game, launch_error, window);
+        if (ImGui::Button("Play", ImVec2(160 * uiScale, 0))) {
+            launch_error = options.Validate();
+            if (options.wait_for_process && options.wait_pid == Core::Debugger::GetCurrentPid())
+                launch_error = "Choose another process ID; the launcher cannot wait for itself.";
+            if (launch_error.empty() && options.Save(settings_file, launch_error)) {
+                play = true; done = true;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Launch Settings")) {
+            showLaunchSettings = true;
+            launch_error.clear();
+        }
+        if (!launch_error.empty()) ImGui::TextWrapped("%s", launch_error.c_str());
 
         ImGuiWindowFlags child_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                                        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NavFlattened;
@@ -288,14 +450,17 @@ void Launch(char* executableName, bool sameProcess) {
 
         ImGui::BeginChild("ContentRegion", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()), true,
                           child_flags);
-        Overlay::TextCentered("Select Game");
+        Overlay::TextCentered("Game Library");
         ImGui::Dummy(ImVec2(0.0f, 10.f * uiScale));
 
         if (ImGui::IsWindowAppearing()) {
             ImGui::SetKeyboardFocusHere();
         }
 
-        SetGameIcons(gameIcons);
+        if (gameIcons.empty())
+            ImGui::TextWrapped("Choose a game above, enter a game path or ID, or add a library "
+                               "folder under Emulator Settings.");
+        SetGameIcons(gameIcons, options.game);
         ImGui::EndChild();
         ImGui::Separator();
 
@@ -314,12 +479,12 @@ void Launch(char* executableName, bool sameProcess) {
         ImGui::SameLine();
 
         // Align buttons right
-        float buttonsWidth = ImGui::CalcTextSize("Settings").x + ImGui::CalcTextSize("Exit").x +
+        float buttonsWidth = ImGui::CalcTextSize("Emulator Settings").x + ImGui::CalcTextSize("Exit").x +
                              ImGui::GetStyle().FramePadding.x * 4.0f +
                              ImGui::GetStyle().ItemSpacing.x;
         ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - buttonsWidth);
 
-        if (ImGui::Button("Settings")) {
+        if (ImGui::Button("Emulator Settings")) {
             EmulatorSettings.SetBigPictureScale(static_cast<int>(uiScale * 1000));
             EmulatorSettings.Save();
             settingsWindow.Prepare();
@@ -359,6 +524,13 @@ void Launch(char* executableName, bool sameProcess) {
             settingsWindow.DrawSettings(&showSettings, applySettings);
         }
 
+        if (showLaunchSettings) {
+            bool refresh = false;
+            DrawLaunchSettings(options, commandLineHelp, showLaunchSettings, launch_error,
+                               refresh, window, settings_file);
+            if (refresh) applySettings();
+        }
+
         ImGui::PopStyleVar(8);
         ImGui::PopStyleColor(5);
         ImGui::End();
@@ -372,6 +544,8 @@ void Launch(char* executableName, bool sameProcess) {
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
+    for (const auto& icon : gameIcons) SDL_DestroyTexture(reinterpret_cast<SDL_Texture*>(icon.textureId));
+    gameIcons.clear();
     SDL_DestroyRenderer(renderer);
     renderer = nullptr;
     SDL_DestroyWindow(window);
@@ -380,16 +554,8 @@ void Launch(char* executableName, bool sameProcess) {
     EmulatorSettings.SetBigPictureScale(static_cast<int>(uiScale * 1000));
     EmulatorSettings.Save();
 
-    if (runEbootPath != "") {
-        auto* emulator = Common::Singleton<Core::Emulator>::Instance();
-        emulator->executableName = executableName;
-        if (sameProcess) {
-            emulator->Run(runEbootPath);
-        } else {
-            emulator->Relaunch(
-                {"--log-append", "--game", Common::FS::PathToUTF8String(runEbootPath)});
-        }
-    }
+    if (!play && !settings_load_failed) options.Save(settings_file, launch_error);
+    return play ? std::optional<Launcher::Options>{options} : std::nullopt;
 }
 
 } // namespace BigPictureMode
