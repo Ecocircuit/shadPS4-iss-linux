@@ -5,6 +5,7 @@
 #include <stb_image.h>
 
 #include "common/logging/log.h"
+#include "common/game_folder.h"
 #include "core/devtools/layer.h"
 #include "core/emulator_settings.h"
 #include "core/file_format/psf.h"
@@ -146,16 +147,11 @@ void GetGameIconInfo(std::vector<IconInfo>& icons) {
 
     for (const auto& installLoc : EmulatorSettings.GetAllGameInstallDirs()) {
         if (installLoc.enabled && std::filesystem::exists(installLoc.path)) {
-            for (const auto& entry : std::filesystem::directory_iterator(installLoc.path)) {
-                if (entry.path().filename().string().ends_with("-UPDATE") ||
-                    entry.path().filename().string().ends_with("-patch") || !entry.is_directory()) {
-                    continue;
-                }
-
+            for (const auto& game_folder : Common::FindGameFolders(installLoc.path)) {
                 IconInfo icon;
                 PSF psf;
                 const std::string sfoFileName = "param.sfo";
-                std::filesystem::path sfoPath = UpdateChecker(sfoFileName, entry.path());
+                std::filesystem::path sfoPath = UpdateChecker(sfoFileName, game_folder);
 
                 if (std::filesystem::exists(sfoPath) && psf.Open(sfoPath)) {
                     if (const auto title = psf.GetString("TITLE"); title.has_value()) {
@@ -170,12 +166,12 @@ void GetGameIconInfo(std::vector<IconInfo>& icons) {
                 }
 
                 const std::string iconFileName = "icon0.png";
-                std::filesystem::path iconPath = UpdateChecker(iconFileName, entry.path());
+                std::filesystem::path iconPath = UpdateChecker(iconFileName, game_folder);
 
                 SDL_Texture* texture = LoadSdlTextureDataFromFile(iconPath);
                 icon.textureId = ImTextureID(texture);
 
-                icon.ebootPath = entry.path() / "eboot.bin";
+                icon.ebootPath = game_folder / "eboot.bin";
                 icon.focusState = false;
                 icons.push_back(icon);
             }

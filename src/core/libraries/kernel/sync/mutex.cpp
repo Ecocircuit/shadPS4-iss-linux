@@ -145,12 +145,14 @@ void ReportMutexReentry(const char* name, void* outer_caller, void* inner_caller
     }
 #ifdef _WIN64
     const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    const auto thread_id = GetCurrentThreadId();
 #else
     const uintptr_t base = 0;
+    const auto thread_id = std::hash<std::thread::id>{}(std::this_thread::get_id());
 #endif
     // Offsets from the EXE base: symbolize with the archived PDB (llvm-symbolizer --obj).
     LOG_ERROR(Kernel, "SwitchMutex re-entry #{} ({}) tid={} outer=exe+{:#x} inner=exe+{:#x}", n, name,
-              GetCurrentThreadId(), reinterpret_cast<uintptr_t>(outer_caller) - base,
+              thread_id, reinterpret_cast<uintptr_t>(outer_caller) - base,
               reinterpret_cast<uintptr_t>(inner_caller) - base);
 }
 

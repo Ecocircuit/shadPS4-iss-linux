@@ -964,9 +964,15 @@ std::atomic<u32> g_gm_in_gpu_wait{0};
 
 void NoteGameMainGpuWait(u64 ticks) {
     void* frames[4]{};
+#ifdef _WIN32
     const u32 n = RtlCaptureStackBackTrace(1, 4, frames, nullptr);
-    std::array<u64, 4> key{};
     const u64 exe = reinterpret_cast<u64>(GetModuleHandleA(nullptr));
+#else
+    // The native Windows sampler is unavailable; retain the portable wait-site tag.
+    constexpr u32 n = 0;
+    constexpr u64 exe = 0;
+#endif
+    std::array<u64, 4> key{};
     for (u32 i = 0; i < n && i < 4; ++i) {
         key[i] = reinterpret_cast<u64>(frames[i]) - exe;
     }
@@ -1212,9 +1218,10 @@ void GameMainCensusMaybeLog() {
             s += fmt::format(" {:#x}:{:.1f}%", top[i].second << 6, 100.0 * top[i].first / std::max<u64>(n, 1));
         }
         for (size_t i = 0; i < std::min<size_t>(host.size(), 12); ++i) {
+            const u64 addr = host[i].second << 12;
+#ifdef _WIN32
             HMODULE mod{};
             char name[64] = "?";
-            const u64 addr = host[i].second << 12;
             if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                                        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                                    reinterpret_cast<LPCSTR>(addr), &mod)) {
@@ -1226,6 +1233,10 @@ void GameMainCensusMaybeLog() {
             }
             hs += fmt::format(" {}+{:#x}:{:.1f}%", name,
                               addr - reinterpret_cast<u64>(mod), 100.0 * host[i].first / std::max<u64>(n, 1));
+#else
+            hs += fmt::format(" host@{:#x}:{:.1f}%", addr,
+                              100.0 * host[i].first / std::max<u64>(n, 1));
+#endif
         }
         LOG_INFO(Render,
                  "GameMain census RIP: samples {} | eboot {:.1f}% other guest modules {:.1f}% host "
@@ -1298,6 +1309,7 @@ void GameMainCensusMaybeLog() {
         g_gm.last_frames = frames_now;
         const double frame_ms = fr > 0 ? 1000.0 / fr : 0.0;
         const auto host_name = [](u64 addr) {
+#ifdef _WIN32
             HMODULE mod{};
             char name[64] = "?";
             if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -1310,6 +1322,9 @@ void GameMainCensusMaybeLog() {
                 }
             }
             return fmt::format("{}+{:#x}", name, addr - reinterpret_cast<u64>(mod));
+#else
+            return fmt::format("host@{:#x}", addr);
+#endif
         };
         std::vector<std::pair<u64, u32>> steps;
         std::unordered_map<u32, u64> steps_host;

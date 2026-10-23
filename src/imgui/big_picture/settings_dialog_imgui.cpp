@@ -7,10 +7,12 @@
 #include <ImGuiFileDialog.h>
 #include <cmrc/cmrc.hpp>
 #include <stb_image.h>
+#include <SDL3/SDL_video.h>
 
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
+#include "common/native_folder_dialog.h"
 #include "core/devtools/layer.h"
 #include "imgui/imgui_std.h"
 #include "settings_dialog_imgui.h"
@@ -615,6 +617,18 @@ void SettingsWindow::DrawGameFolderManager() {
                       child_flags);
 
     if (ImGui::Button("Add Folder", ImVec2(400.f * uiScale, 0))) {
+#ifdef __linux__
+        auto choice = Common::PickNativeFolder(SDL_GetKeyboardFocus());
+        if (choice.path) {
+            GameInstallDir dir;
+            dir.path = *choice.path;
+            dir.enabled = true;
+            m_GameInstallDirs.push_back(dir);
+            SaveInstallDirs();
+        }
+        if (!choice.error.empty()) {
+            LOG_WARNING(ImGui, "Native folder picker unavailable: {}", choice.error);
+#endif
         ImGuiFileDialog::Instance()->OpenDialog("OpenFolder", "Add shadPS4 game folder", nullptr,
                                                 ".", 1, nullptr,
                                                 ImGuiFileDialogFlags_DisableCreateDirectoryButton |
@@ -623,7 +637,36 @@ void SettingsWindow::DrawGameFolderManager() {
         ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->Pos);
         ImGui::SetNextWindowSize(viewport->Size);
+#ifdef __linux__
+        }
+#endif
     }
+
+#ifdef __linux__
+    static char folder_path[4096] = {};
+    static std::string folder_error;
+    ImGui::InputTextWithHint("##game-folder-path", "/home/tony/games/game-folder", folder_path,
+                             sizeof(folder_path));
+    ImGui::SameLine();
+    if (ImGui::Button("Add Path")) {
+        const std::filesystem::path path{folder_path};
+        std::error_code ec;
+        if (path.is_absolute() && std::filesystem::is_directory(path, ec)) {
+            GameInstallDir dir;
+            dir.path = path;
+            dir.enabled = true;
+            m_GameInstallDirs.push_back(dir);
+            SaveInstallDirs();
+            folder_path[0] = '\0';
+            folder_error.clear();
+        } else {
+            folder_error = "Enter an existing absolute folder path.";
+        }
+    }
+    if (!folder_error.empty()) {
+        ImGui::TextWrapped("%s", folder_error.c_str());
+    }
+#endif
 
     if (ImGuiFileDialog::Instance()->Display("OpenFolder", child_flags | ImGuiWindowFlags_NoMove)) {
         if (ImGuiFileDialog::Instance()->IsOk()) {

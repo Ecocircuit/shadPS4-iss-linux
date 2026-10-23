@@ -15,9 +15,11 @@
 //   own variables still win. The working directory becomes the EXE's folder (portable user\).
 // - With no arguments the game path comes from shadps4-game.txt next to the EXE; the first launch
 //   asks for the game folder (the one holding eboot.bin) and saves it there.
+// Linux also supports this startup without a marker file, uses SDL's native
+// desktop portal picker, and stores the saved game under the user data directory.
 namespace Common::ReleaseMode {
 
-/// True when shadps4-flags.txt was found next to the EXE.
+/// Windows: a flags file activates release mode. Linux: native startup is always available.
 bool Active();
 /// Variables taken from the file / lines skipped because the environment already set them.
 int FlagsApplied();

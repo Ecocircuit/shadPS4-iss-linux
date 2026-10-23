@@ -69,6 +69,9 @@ Check the build instructions for [**Windows**](https://github.com/shadps4-emu/sh
 
 ## Linux
 
+For this fork's native startup, KDE folder picker, and Arch/CachyOS build instructions,
+see [Native Linux / CachyOS](documents/cachyos.md). Hardware gameplay validation is still required.
+
 Check the build instructions for [**Linux**](https://github.com/shadps4-emu/shadPS4/blob/main/documents/building-linux.md).
 
 ## macOS

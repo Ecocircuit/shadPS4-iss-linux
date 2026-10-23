@@ -381,7 +381,7 @@ struct PageManager::Impl {
             // Batch-mix diagnostic: the write-fault RIP too (low bit set marks a write).
             if (Common::ReadbackOffload::LatencyEnabled()) [[unlikely]] {
                 Common::ReadbackOffload::t_read_fault_rip =
-                    static_cast<EXCEPTION_POINTERS*>(context)->ContextRecord->Rip | 1ULL << 63;
+                    reinterpret_cast<u64>(Common::GetRip(context)) | 1ULL << 63;
             }
             // A fault taken by the CP itself is part of the command stream it is executing, so
             // only guest threads' faults may be deferred (submit_epoch.h).
@@ -408,20 +408,24 @@ struct PageManager::Impl {
         } else {
             // Read faults only exist under Precise readbacks - it is the only mode that
             // read-protects guest pages holding GPU-modified data.
+#ifdef _WIN64
             if (ReadFaultRipEnabled()) [[unlikely]] {
                 SnapshotReadFaultPage(addr);
             }
+#endif
             if (Common::ReadbackOffload::LatencyEnabled()) [[unlikely]] {
                 Common::ReadbackOffload::t_read_fault_rip =
-                    static_cast<EXCEPTION_POINTERS*>(context)->ContextRecord->Rip;
+                    reinterpret_cast<u64>(Common::GetRip(context));
             }
             const bool handled = rasterizer->ReadMemory(addr, 8);
             Common::ReadbackOffload::t_read_fault_rip = 0;
             Common::FaultMonitor::CountGuestReadFault(handled, Common::FaultMonitor::SinceNs(start),
                                                       addr);
+#ifdef _WIN64
             if (handled && ReadFaultRipEnabled()) [[unlikely]] {
                 LogReadFaultRip(context, addr);
             }
+#endif
             return handled;
         }
     }
@@ -1141,5 +1145,10 @@ void ArmTimestampReaderProbe(const void* address) {
     DWORD old{};
     VirtualProtect(page, 4096, mbi.Protect | PAGE_GUARD, &old);
 }
+} // namespace AmdGpu
+#else
+namespace AmdGpu {
+// PAGE_GUARD timestamp diagnostics are Windows-only; timestamp writes still work.
+void ArmTimestampReaderProbe(const void*) {}
 } // namespace AmdGpu
 #endif

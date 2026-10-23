@@ -31,6 +31,16 @@
 #endif
 
 int main(int argc, char* argv[]) {
+    // Portable startup can change cwd before main. Keep child launches independent
+    // of the relative path the shell or desktop entry originally used.
+#ifdef __linux__
+    std::error_code executable_error;
+    std::string executable_path =
+        std::filesystem::read_symlink("/proc/self/exe", executable_error).string();
+    char* executable_name = executable_error ? argv[0] : executable_path.data();
+#else
+    char* executable_name = argv[0];
+#endif
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
 #endif
@@ -74,7 +84,7 @@ int main(int argc, char* argv[]) {
     std::optional<std::string> patchFile;
 
     // ---- Options ----
-    app.add_option("-g,--game", gamePath, "Game path or ID");
+    app.add_option("-g,--game", gamePath, "Game folder, executable path or ID");
     app.add_option("-p,--patch", patchFile, "Patch file to apply");
     app.add_flag("-i,--ignore-game-patch", ignoreGamePatch,
                  "Disable automatic loading of game patches");
@@ -167,7 +177,7 @@ int main(int argc, char* argv[]) {
     Common::Log::g_should_append |= EmulatorSettings.IsLogAppend();
 
     if (bigPicture) {
-        BigPictureMode::Launch(argv[0], sameProcess);
+        BigPictureMode::Launch(executable_name, sameProcess);
         return 0;
     }
 
@@ -234,6 +244,13 @@ int main(int argc, char* argv[]) {
     // ---- Resolve game path or ID ----
     // The picked path keeps its wide characters (a narrow string is read in the ANSI code page).
     std::filesystem::path ebootPath = releaseGame ? *releaseGame : std::filesystem::path(*gamePath);
+    if (std::filesystem::is_directory(ebootPath)) {
+        ebootPath /= "eboot.bin";
+        if (!std::filesystem::is_regular_file(ebootPath)) {
+            LOG_ERROR(Debug, "Game folder has no eboot.bin: {}", *gamePath);
+            return 1;
+        }
+    }
     const auto archive_component_exists = [](const std::filesystem::path& p) -> bool {
         std::filesystem::path accum;
         for (const auto& comp : p) {
@@ -261,7 +278,7 @@ int main(int argc, char* argv[]) {
     }
 
     auto* emulator = Common::Singleton<Core::Emulator>::Instance();
-    emulator->executableName = argv[0];
+    emulator->executableName = executable_name;
     emulator->waitForDebuggerBeforeRun = waitForDebugger;
     emulator->Run(ebootPath, gameArgs, overrideRoot);
 

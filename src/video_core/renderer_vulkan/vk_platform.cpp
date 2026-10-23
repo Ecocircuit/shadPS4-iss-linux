@@ -25,6 +25,11 @@
 #include "core/emulator_settings.h"
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+// Xlib macros otherwise collide with the shader enums pulled in by vk_dlss.h.
+#undef None
+#undef Always
+#endif
 #include "video_core/renderer_vulkan/vk_dlss.h"
 
 #ifdef __APPLE__

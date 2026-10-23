@@ -324,7 +324,7 @@ std::optional<std::filesystem::path> GamePath() {
 
 } // namespace Common::ReleaseMode
 
-#else
+#elif !defined(__linux__)
 
 namespace Common::ReleaseMode {
 bool Active() {
