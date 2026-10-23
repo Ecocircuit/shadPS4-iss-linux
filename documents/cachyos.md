@@ -18,7 +18,9 @@ sudo pacman -S --needed base-devel git clang libc++ libc++abi cmake ninja python
 ```
 
 Current systemd/libudev provides the udev API. Most project libraries, including SDL3,
-are built from pinned submodules rather than system versions. Do not install
+are built from pinned submodules rather than system versions. The Linux build
+script applies three small, idempotent compatibility fixes to ZArchive, Sirit
+and OpenAL Soft for newer libc++ headers; these appear as local submodule edits. Do not install
 SDL2 in place of the bundled SDL3. Keep your existing PipeWire audio setup.
 
 From a Git checkout with this fork's changes:
@@ -113,3 +115,6 @@ fails because the settings loader accepts this Windows setting from global JSON.
 The Linux startup tests pass. `HostOverride.ActiveExactHostMatchFromJsonFile` is
 skipped by its existing test logic. The script reports CTest's exit status after
 also running the independent Linux startup and CLI checks.
+
+For the investigated Second Son loading crash and a targeted heap diagnostic, see
+[Linux allocation investigation](Debugging/second-son-linux-allocation.md).

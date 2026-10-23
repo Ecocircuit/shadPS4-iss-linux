@@ -8,6 +8,7 @@ jobs=${SHADPS4_BUILD_JOBS:-4}
 mapfile -t modules < <(git config -f .gitmodules --get-regexp path |
     awk '$2 != "externals/mesa-kosmickrisp" { print $2 }')
 git submodule update --init --recursive --jobs "$jobs" -- "${modules[@]}"
+python3 scripts/prepare-linux-dependencies.py
 common=(-G Ninja -DCMAKE_C_COMPILER="${CC:-clang}" -DCMAKE_CXX_COMPILER="${CXX:-clang++}"
     -DCMAKE_CXX_FLAGS="${CXXFLAGS:--stdlib=libc++ -fexperimental-library}")
 cmake -S . -B "$build_root/app" "${common[@]}" -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF
